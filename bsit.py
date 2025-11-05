@@ -11,6 +11,9 @@ from scipy.spatial.distance import cdist
 import folium
 from folium.plugins import HeatMap
 import warnings
+import os
+import glob
+import re
 warnings.filterwarnings('ignore')
 
 class EDSACrashAnalyzer:
@@ -20,14 +23,67 @@ class EDSACrashAnalyzer:
         self.kde_model = None
         self.crash_gdf = None
         self.hotspots = None
+    
+    def _parse_coordinate(self, coord_str):
+        """Parse coordinate string that may contain degree symbols and directions"""
+        if pd.isna(coord_str):
+            return None
         
-    def load_crash_data(self, data_path):
+        coord_str = str(coord_str).strip()
+        
+        # Remove degree symbol, N, S, E, W, and extra spaces
+        coord_str = re.sub(r'[°NSEW\s]', '', coord_str)
+        
         try:
-            self.crash_data = pd.read_csv(data_path)
+            return float(coord_str)
+        except ValueError:
+            return None
+    
+    def _standardize_dataframe(self, df):
+        """Standardize column names and data formats"""
+        # Standardize column names to lowercase
+        df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
+        
+        # Map various column name variations
+        column_mapping = {
+            'crash_id': 'crash_id',
+            'latitude': 'latitude',
+            'longitude': 'longitude',
+            'year': 'year',
+            'severity': 'severity'
+        }
+        
+        # Rename if exact match exists
+        for old_name, new_name in column_mapping.items():
+            if old_name in df.columns and old_name != new_name:
+                df.rename(columns={old_name: new_name}, inplace=True)
+        
+        # Parse latitude and longitude if they contain degree symbols
+        if 'latitude' in df.columns:
+            df['latitude'] = df['latitude'].apply(self._parse_coordinate)
+        
+        if 'longitude' in df.columns:
+            df['longitude'] = df['longitude'].apply(self._parse_coordinate)
+        
+        # Standardize severity values
+        if 'severity' in df.columns:
+            df['severity'] = df['severity'].str.strip().str.title()
+        
+        # Create a date column from year if it exists
+        if 'year' in df.columns and 'date' not in df.columns:
+            df['date'] = pd.to_datetime(df['year'].astype(str) + '-01-01', errors='coerce')
+        
+        return df
+    
+    def load_crash_data(self, data_path):
+        """Load crash data from a single CSV file"""
+        try:
+            df = pd.read_csv(data_path)
+            df = self._standardize_dataframe(df)
+            self.crash_data = df
             print(f"Loaded {len(self.crash_data)} crash records from {data_path}")
         except FileNotFoundError:
             print(f"File not found: {data_path}")
-            print("Please ensure the CSV file exists with columns: latitude, longitude, date, severity, vehicle_type")
             return False
         except Exception as e:
             print(f"Error loading data: {str(e)}")
@@ -39,10 +95,79 @@ class EDSACrashAnalyzer:
             print(f"Missing required columns: {missing_cols}")
             return False
         
+        # Remove rows with invalid coordinates
+        self.crash_data = self.crash_data.dropna(subset=['latitude', 'longitude'])
+        
         geometry = [Point(xy) for xy in zip(self.crash_data.longitude, self.crash_data.latitude)]
         self.crash_gdf = gpd.GeoDataFrame(self.crash_data, geometry=geometry, crs='EPSG:4326')
         
         return True
+    
+    def load_multiple_crash_data(self, data_paths):
+        """Load and combine crash data from multiple CSV files"""
+        try:
+            all_dataframes = []
+            
+            for data_path in data_paths:
+                if not os.path.exists(data_path):
+                    print(f"Warning: File not found: {data_path}")
+                    continue
+                
+                try:
+                    df = pd.read_csv(data_path)
+                    df = self._standardize_dataframe(df)
+                    all_dataframes.append(df)
+                    print(f"Loaded {len(df)} crash records from {os.path.basename(data_path)}")
+                except Exception as e:
+                    print(f"Error loading {data_path}: {str(e)}")
+                    continue
+            
+            if not all_dataframes:
+                print("No data files were successfully loaded")
+                return False
+            
+            # Combine all dataframes
+            self.crash_data = pd.concat(all_dataframes, ignore_index=True)
+            print(f"\nTotal combined crash records: {len(self.crash_data)}")
+            
+            # Remove rows with invalid coordinates
+            initial_count = len(self.crash_data)
+            self.crash_data = self.crash_data.dropna(subset=['latitude', 'longitude'])
+            
+            if len(self.crash_data) < initial_count:
+                print(f"Removed {initial_count - len(self.crash_data)} records with invalid coordinates")
+            
+            required_columns = ['latitude', 'longitude']
+            missing_cols = [col for col in required_columns if col not in self.crash_data.columns]
+            if missing_cols:
+                print(f"Missing required columns: {missing_cols}")
+                return False
+            
+            geometry = [Point(xy) for xy in zip(self.crash_data.longitude, self.crash_data.latitude)]
+            self.crash_gdf = gpd.GeoDataFrame(self.crash_data, geometry=geometry, crs='EPSG:4326')
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error combining data: {str(e)}")
+            return False
+    
+    def load_crash_data_from_directory(self, directory_path, pattern='*.csv'):
+        """Load all CSV files matching pattern from a directory"""
+        try:
+            search_path = os.path.join(directory_path, pattern)
+            csv_files = sorted(glob.glob(search_path))
+            
+            if not csv_files:
+                print(f"No CSV files found in {directory_path}")
+                return False
+            
+            print(f"Found {len(csv_files)} CSV files")
+            return self.load_multiple_crash_data(csv_files)
+            
+        except Exception as e:
+            print(f"Error loading from directory: {str(e)}")
+            return False
     
     def preprocess_data(self):
         print("Preprocessing crash data...")
@@ -273,38 +398,122 @@ class EDSACrashAnalyzer:
         # Create summary statistics
         self._create_summary_report()
     
-    def create_interactive_map(self, save_path='edsa_crash_analysis.html'):
+    def create_interactive_map(self, save_path='edsa_crash_analysis.html', style='detailed'):
+        """
+        Create interactive map with enhanced visualization
+        
+        Parameters:
+        -----------
+        save_path : str
+            Output HTML file path
+        style : str
+            'detailed' - Shows individual crash markers and heatmap
+            'heatmap_only' - Shows only heatmap (cleaner, like reference image)
+        """
         print("Creating interactive map...")
         
         center_lat = self.crash_data['latitude'].mean()
         center_lon = self.crash_data['longitude'].mean()
         
-        m = folium.Map(location=[center_lat, center_lon], zoom_start=11)
+        # Create map with better tile options
+        m = folium.Map(
+            location=[center_lat, center_lon], 
+            zoom_start=12,
+            tiles='OpenStreetMap',  # or 'CartoDB positron' for cleaner look
+            control_scale=True
+        )
         
-        for _, crash in self.crash_data.iterrows():
-            color = 'red' if crash.get('severity') == 'Fatal' else 'orange' if crash.get('severity') == 'Major' else 'yellow'
-            folium.CircleMarker(
-                location=[crash['latitude'], crash['longitude']],
-                radius=3,
-                popup=f"Crash ID: {crash.get('crash_id', 'N/A')}<br>Severity: {crash.get('severity', 'Unknown')}",
-                color=color,
-                fillColor=color,
-                fillOpacity=0.7
-            ).add_to(m)
+        # Add alternative tile layers
+        folium.TileLayer('CartoDB positron', name='Light Map').add_to(m)
+        folium.TileLayer('CartoDB dark_matter', name='Dark Map').add_to(m)
         
+        # Create feature groups for layer control
+        crash_layer = folium.FeatureGroup(name='Individual Crashes')
+        hotspot_layer = folium.FeatureGroup(name='Hotspot Markers')
+        heatmap_layer = folium.FeatureGroup(name='Heatmap', show=True)
+        
+        # Add individual crash markers (if style is detailed)
+        if style == 'detailed':
+            for _, crash in self.crash_data.iterrows():
+                color = 'red' if crash.get('severity') == 'Fatal' else 'orange' if crash.get('severity') == 'Major' else 'yellow'
+                folium.CircleMarker(
+                    location=[crash['latitude'], crash['longitude']],
+                    radius=3,
+                    popup=f"Crash ID: {crash.get('crash_id', 'N/A')}<br>Severity: {crash.get('severity', 'Unknown')}",
+                    color=color,
+                    fillColor=color,
+                    fillOpacity=0.6,
+                    weight=1
+                ).add_to(crash_layer)
+        
+        # Add hotspot markers with warning triangles
         if self.hotspots is not None and len(self.hotspots) > 0:
             for _, hotspot in self.hotspots.iterrows():
+                # Create custom icon with warning symbol
                 folium.Marker(
                     location=[hotspot['latitude'], hotspot['longitude']],
-                    popup=f"Hotspot: {hotspot['crash_count']} crashes<br>Severity Score: {hotspot['severity_score']:.2f}",
-                    icon=folium.Icon(color='blue', icon='warning-sign')
-                ).add_to(m)
+                    popup=folium.Popup(
+                        f"<b>⚠️ HOTSPOT</b><br>"
+                        f"Crashes: {hotspot['crash_count']}<br>"
+                        f"Severity Score: {hotspot['severity_score']:.2f}<br>"
+                        f"Location: ({hotspot['latitude']:.4f}, {hotspot['longitude']:.4f})",
+                        max_width=250
+                    ),
+                    icon=folium.Icon(
+                        color='lightblue',
+                        icon='warning-sign',
+                        prefix='glyphicon'
+                    )
+                ).add_to(hotspot_layer)
         
+        # Enhanced heatmap with better color gradient
+        # Gradient: blue -> cyan -> green -> yellow -> orange -> red
         heat_data = [[row['latitude'], row['longitude']] for _, row in self.crash_data.iterrows()]
-        HeatMap(heat_data, radius=15, blur=10, max_zoom=1).add_to(m)
+        
+        # Create heatmap with enhanced parameters
+        HeatMap(
+            heat_data,
+            min_opacity=0.2,
+            max_opacity=0.8,
+            radius=25,  # Increased radius for smoother appearance
+            blur=20,    # Increased blur for better gradient
+            max_zoom=13,
+            gradient={
+                0.0: 'blue',
+                0.2: 'cyan',
+                0.4: 'lime',
+                0.6: 'yellow',
+                0.8: 'orange',
+                1.0: 'red'
+            }
+        ).add_to(heatmap_layer)
+        
+        # Add layers to map
+        crash_layer.add_to(m)
+        hotspot_layer.add_to(m)
+        heatmap_layer.add_to(m)
+        
+        # Add layer control
+        folium.LayerControl(position='topright', collapsed=False).add_to(m)
+        
+        # Add title/legend
+        title_html = '''
+        <div style="position: fixed; 
+                    top: 10px; left: 50px; width: 300px; height: 90px; 
+                    background-color: white; border:2px solid grey; z-index:9999; 
+                    font-size:14px; padding: 10px; opacity: 0.9;">
+        <h4 style="margin:0;">EDSA Crash Analysis</h4>
+        <p style="margin:5px 0;"><span style="color:blue;">●</span> Low Density</p>
+        <p style="margin:5px 0;"><span style="color:yellow;">●</span> Medium Density</p>
+        <p style="margin:5px 0;"><span style="color:red;">●</span> High Density</p>
+        </div>
+        '''
+        m.get_root().html.add_child(folium.Element(title_html))
         
         m.save(save_path)
         print(f"Interactive map saved to {save_path}")
+        print(f"Heatmap style: {style}")
+        print(f"Open {save_path} in your browser to view the map")
         return m
     
     def _create_summary_report(self):
@@ -314,10 +523,22 @@ class EDSACrashAnalyzer:
         
         print(f"\nDATA OVERVIEW:")
         print(f"Total Crashes Analyzed: {len(self.crash_data)}")
-        if 'date' in self.crash_data.columns:
+        
+        if 'year' in self.crash_data.columns:
+            year_min = int(self.crash_data['year'].min())
+            year_max = int(self.crash_data['year'].max())
+            print(f"Year Range: {year_min} to {year_max}")
+            
+            print(f"\nCRASHES BY YEAR:")
+            year_counts = self.crash_data['year'].value_counts().sort_index()
+            for year, count in year_counts.items():
+                print(f"  {int(year)}: {count} crashes")
+        elif 'date' in self.crash_data.columns:
             print(f"Date Range: {self.crash_data['date'].min()} to {self.crash_data['date'].max()}")
-        print(f"Geographic Coverage: {self.crash_data['latitude'].min():.4f}° to {self.crash_data['latitude'].max():.4f}° N")
-        print(f"                    {self.crash_data['longitude'].min():.4f}° to {self.crash_data['longitude'].max():.4f}° E")
+        
+        print(f"\nGEOGRAPHIC COVERAGE:")
+        print(f"  Latitude:  {self.crash_data['latitude'].min():.4f}° to {self.crash_data['latitude'].max():.4f}° N")
+        print(f"  Longitude: {self.crash_data['longitude'].min():.4f}° to {self.crash_data['longitude'].max():.4f}° E")
         
         if 'severity' in self.crash_data.columns:
             print(f"\nSEVERITY BREAKDOWN:")
@@ -434,27 +655,120 @@ def main():
     
     analyzer = EDSACrashAnalyzer()
     
-    # Ask user for data path or create sample data
-    use_sample = input("Use sample data? (y/n): ").lower().strip()
+    # Ask user for data loading option
+    print("\nData Loading Options:")
+    print("1. Load from CSVData directory (recommended)")
+    print("2. Load specific files")
+    print("3. Use sample data")
     
-    if use_sample == 'y' or use_sample == 'yes':
+    choice = input("\nSelect option (1/2/3): ").strip()
+    
+    if choice == '1':
+        # Load all CSV files from CSVData directory
+        directory = 'CSVData'
+        if not os.path.exists(directory):
+            print(f"Directory '{directory}' not found. Please ensure the CSVData folder exists.")
+            return None, None
+        
+        if not analyzer.load_crash_data_from_directory(directory):
+            return None, None
+            
+    elif choice == '2':
+        # Load specific files
+        print("\nEnter CSV file paths (comma-separated):")
+        file_input = input("Files: ").strip()
+        
+        if not file_input:
+            print("No files specified.")
+            return None, None
+        
+        file_paths = [f.strip() for f in file_input.split(',')]
+        
+        if not analyzer.load_multiple_crash_data(file_paths):
+            return None, None
+            
+    elif choice == '3':
+        # Use sample data
         data_path = create_sample_data()
         print(f"Using sample data: {data_path}")
+        
+        if not analyzer.load_crash_data(data_path):
+            return None, None
     else:
-        data_path = input("Enter path to crash data CSV file: ")
-    
-    if not analyzer.load_crash_data(data_path):
+        print("Invalid option selected.")
         return None, None
     
+    # Perform analysis
+    print("\nStarting analysis...")
     analyzer.preprocess_data()
     analyzer.perform_kde_analysis(bandwidth=0.008)
     analyzer.identify_hotspots(threshold_percentile=85)
     performance_metrics = analyzer.evaluate_model_performance()
-    analyzer.create_visualizations()
-    analyzer.create_interactive_map()
     
-    print("\nAnalysis complete! Check the generated visualizations and interactive map.")
+    # Create visualizations
+    print("\nGenerating visualizations...")
+    analyzer.create_visualizations()
+    
+    # Create interactive maps
+    print("\nCreating interactive maps...")
+    analyzer.create_interactive_map('edsa_crash_detailed.html', style='detailed')
+    analyzer.create_interactive_map('edsa_crash_heatmap.html', style='heatmap_only')
+    
+    print("\n" + "="*50)
+    print("Analysis complete! Check the generated files:")
+    print("  - Static plots (displayed)")
+    print("  - edsa_crash_detailed.html (detailed map with markers)")
+    print("  - edsa_crash_heatmap.html (heatmap only - clean view)")
+    print("="*50)
+    
+    return analyzer, performance_metrics
+
+def quick_analysis_from_csvdata():
+    """Quick analysis using all CSV files from CSVData directory"""
+    print("Starting Quick EDSA Road Crash Spatial Analysis")
+    print("="*50)
+    
+    analyzer = EDSACrashAnalyzer()
+    
+    directory = 'CSVData'
+    if not os.path.exists(directory):
+        print(f"Directory '{directory}' not found. Please ensure the CSVData folder exists.")
+        return None, None
+    
+    print(f"\nLoading all CSV files from '{directory}' directory...")
+    if not analyzer.load_crash_data_from_directory(directory):
+        return None, None
+    
+    # Perform analysis
+    print("\nStarting analysis...")
+    analyzer.preprocess_data()
+    analyzer.perform_kde_analysis(bandwidth=0.008)
+    analyzer.identify_hotspots(threshold_percentile=85)
+    performance_metrics = analyzer.evaluate_model_performance()
+    
+    # Create visualizations
+    print("\nGenerating visualizations...")
+    analyzer.create_visualizations()
+    
+    # Create interactive maps
+    print("\nCreating interactive maps...")
+    analyzer.create_interactive_map('edsa_crash_detailed.html', style='detailed')
+    analyzer.create_interactive_map('edsa_crash_heatmap.html', style='heatmap_only')
+    
+    print("\n" + "="*50)
+    print("Analysis complete! Check the generated files:")
+    print("  - Static plots (displayed)")
+    print("  - edsa_crash_detailed.html (detailed map with markers)")
+    print("  - edsa_crash_heatmap.html (heatmap only - clean view)")
+    print("="*50)
+    
     return analyzer, performance_metrics
 
 if __name__ == "__main__":
+    # Uncomment one of the following:
+    
+    # Option 1: Interactive menu
     analyzer, metrics = main()
+    
+    # Option 2: Quick analysis from CSVData directory (comment out line above and uncomment below)
+    # analyzer, metrics = quick_analysis_from_csvdata()

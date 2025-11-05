@@ -4,6 +4,13 @@ A comprehensive Python tool for analyzing road crash patterns along EDSA (Epifan
 
 ## Features
 
+### ✨ NEW: Enhanced Data Loading
+- **Multiple File Support**: Load and combine crash data from multiple CSV files automatically
+- **Directory Loading**: Process all CSV files in a directory with a single command
+- **Format Flexibility**: Automatically handles different coordinate formats (with/without degree symbols)
+- **Column Standardization**: Automatically standardizes column names (case-insensitive)
+- **Data Validation**: Robust error handling and data quality checks
+
 ### 🔍 Spatial Analysis
 - **Kernel Density Estimation (KDE)**: Creates density heatmaps to visualize crash concentration areas
 - **DBSCAN Clustering**: Automatically identifies crash hotspots using density-based clustering
@@ -13,12 +20,13 @@ A comprehensive Python tool for analyzing road crash patterns along EDSA (Epifan
 ### 📊 Visualizations
 - **Static Plots**: Four-panel matplotlib visualizations including scatter plots, heatmaps, and temporal analysis
 - **Interactive Maps**: Folium-based web maps with crash markers, hotspots, and heatmap overlays
-- **Temporal Analysis**: Time-series plots showing crash patterns over time
+- **Temporal Analysis**: Time-series plots showing crash patterns over time (now with yearly breakdown)
 - **Cluster Visualization**: Color-coded display of identified crash clusters
 
 ### 📈 Reporting
 - **Performance Metrics**: Comprehensive model evaluation with multiple statistical measures
 - **Summary Reports**: Detailed analysis reports with key findings and recommendations
+- **Yearly Statistics**: Breakdown of crashes by year when year data is available
 - **Hotspot Ranking**: Identification and ranking of the most dangerous locations
 
 ## Installation
@@ -53,34 +61,45 @@ pip install folium>=0.12.0
 1. **Clone or download** the script file
 2. **Run the main script**:
    ```bash
-   python edsa_crash_analyzer.py
+   python bsit.py
    ```
-3. **Choose data source**:
-   - Type `y` to use sample data (for testing)
-   - Type `n` to provide your own CSV file path
+3. **Choose data loading option**:
+   - **Option 1**: Load from CSVData directory (automatically loads all CSV files)
+   - **Option 2**: Load specific files (comma-separated paths)
+   - **Option 3**: Use sample data (for testing)
 
 ### Using Your Own Data
 
-Prepare a CSV file with the following required columns:
-- `latitude`: Crash location latitude (decimal degrees)
-- `longitude`: Crash location longitude (decimal degrees)
+The script now supports **multiple data formats** and will automatically standardize them:
 
-Optional columns for enhanced analysis:
+#### Supported coordinate formats:
+- Decimal degrees: `14.6514, 120.9902`
+- With degree symbols: `14.6514° N, 120.9902° E`
+
+#### Required columns:
+- `latitude` or `LATITUDE`: Crash location latitude
+- `longitude` or `LONGITUDE`: Crash location longitude
+
+#### Optional columns for enhanced analysis:
+- `year` or `YEAR`: Year of crash (will be converted to date)
 - `date`: Crash date (MM/DD/YYYY format)
-- `severity`: Crash severity (`Minor`, `Major`, `Fatal`)
+- `severity` or `SEVERITY`: Crash severity (`Minor`, `Major`, `Fatal`)
 - `vehicle_type`: Type of vehicle involved
-- `crash_id`: Unique identifier for each crash
+- `crash_id` or `CRASH ID`: Unique identifier for each crash
+
+**Note**: Column names are case-insensitive and will be automatically standardized.
 
 ### Example Usage
 
+#### Option 1: Load All Files from Directory
 ```python
-from edsa_crash_analyzer import EDSACrashAnalyzer
+from bsit import EDSACrashAnalyzer
 
 # Initialize analyzer
 analyzer = EDSACrashAnalyzer()
 
-# Load your data
-analyzer.load_crash_data('your_crash_data.csv')
+# Load all CSV files from CSVData directory
+analyzer.load_crash_data_from_directory('CSVData')
 
 # Run complete analysis
 analyzer.preprocess_data()
@@ -91,6 +110,36 @@ analyzer.evaluate_model_performance()
 # Generate visualizations
 analyzer.create_visualizations()
 analyzer.create_interactive_map('crash_map.html')
+```
+
+#### Option 2: Load Multiple Specific Files
+```python
+from bsit import EDSACrashAnalyzer
+
+# Initialize analyzer
+analyzer = EDSACrashAnalyzer()
+
+# Load multiple CSV files
+files = [
+    'CSVData/MCS_SPARCrash 2013.csv',
+    'CSVData/MMDA_Crash_Data_2018.csv',
+    'CSVData/MMDA_Crash_Data_2019.csv'
+]
+analyzer.load_multiple_crash_data(files)
+
+# Run analysis
+analyzer.preprocess_data()
+analyzer.perform_kde_analysis(bandwidth=0.008)
+analyzer.identify_hotspots(threshold_percentile=85)
+analyzer.create_visualizations()
+```
+
+#### Option 3: Quick Analysis (One-Liner)
+```python
+from bsit import quick_analysis_from_csvdata
+
+# Run complete analysis from CSVData directory
+analyzer, metrics = quick_analysis_from_csvdata()
 ```
 
 ## Configuration Options
