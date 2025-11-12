@@ -19,13 +19,56 @@ def create_enhanced_heatmap():
         print("Please ensure the CSVData folder with crash data exists.")
         return
     
-    print("\n📂 Loading crash data from CSVData directory...")
-    
     # Initialize analyzer
     analyzer = EDSACrashAnalyzer()
     
-    # Load all CSV files
-    if not analyzer.load_crash_data_from_directory('CSVData'):
+    # Get available years from directory
+    print("\n📂 Scanning CSVData directory for available years...")
+    available_years = analyzer.get_available_years_from_directory('CSVData')
+    
+    if not available_years:
+        print("\n❌ No CSV files with year information found!")
+        return
+    
+    print(f"✅ Found data for years: {', '.join(map(str, available_years))}")
+    print(f"   Range: {min(available_years)} to {max(available_years)}")
+    
+    # Ask user for year range
+    print("\n" + "="*70)
+    print(" SELECT YEAR RANGE FOR ANALYSIS ".center(70))
+    print("="*70)
+    print("\n💡 Tips:")
+    print("   - Recent years (2020-2023): Fast, ~30 seconds")
+    print("   - All years (2013-2023): Slower, ~2-3 minutes")
+    print("   - Press Enter to use all available years")
+    
+    start_year_input = input(f"\n📅 Start year [{min(available_years)}-{max(available_years)}] (default: {min(available_years)}): ").strip()
+    end_year_input = input(f"📅 End year [{min(available_years)}-{max(available_years)}] (default: {max(available_years)}): ").strip()
+    
+    # Parse user input
+    try:
+        start_year = int(start_year_input) if start_year_input else min(available_years)
+        end_year = int(end_year_input) if end_year_input else max(available_years)
+        
+        # Validate range
+        if start_year < min(available_years) or end_year > max(available_years):
+            print(f"\n⚠️  Year range outside available data. Using full range: {min(available_years)}-{max(available_years)}")
+            start_year, end_year = min(available_years), max(available_years)
+        elif start_year > end_year:
+            print("\n⚠️  Start year > End year. Swapping them.")
+            start_year, end_year = end_year, start_year
+        
+        year_range = (start_year, end_year)
+        print(f"\n✅ Selected year range: {start_year} to {end_year}")
+        
+    except ValueError:
+        print(f"\n⚠️  Invalid input. Using all years: {min(available_years)}-{max(available_years)}")
+        year_range = (min(available_years), max(available_years))
+    
+    print("\n📂 Loading crash data from CSVData directory...")
+    
+    # Load CSV files with year filter
+    if not analyzer.load_crash_data_from_directory('CSVData', year_range=year_range):
         print("\n❌ Failed to load crash data!")
         return
     

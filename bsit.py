@@ -153,8 +153,20 @@ class EDSACrashAnalyzer:
             print(f"Error combining data: {str(e)}")
             return False
     
-    def load_crash_data_from_directory(self, directory_path, pattern='*.csv'):
-        """Load all CSV files matching pattern from a directory"""
+    def load_crash_data_from_directory(self, directory_path, pattern='*.csv', year_range=None):
+        """
+        Load all CSV files matching pattern from a directory
+        
+        Parameters:
+        -----------
+        directory_path : str
+            Path to directory containing CSV files
+        pattern : str
+            File pattern to match (default: '*.csv')
+        year_range : tuple or None
+            (start_year, end_year) to filter files by year in filename
+            Example: (2020, 2023) will only load files with 2020-2023 in the name
+        """
         try:
             search_path = os.path.join(directory_path, pattern)
             csv_files = sorted(glob.glob(search_path))
@@ -163,12 +175,59 @@ class EDSACrashAnalyzer:
                 print(f"No CSV files found in {directory_path}")
                 return False
             
-            print(f"Found {len(csv_files)} CSV files")
+            # Filter by year range if specified
+            if year_range is not None:
+                start_year, end_year = year_range
+                filtered_files = []
+                
+                for file_path in csv_files:
+                    # Extract year from filename using regex
+                    filename = os.path.basename(file_path)
+                    year_match = re.search(r'(\d{4})', filename)
+                    
+                    if year_match:
+                        file_year = int(year_match.group(1))
+                        if start_year <= file_year <= end_year:
+                            filtered_files.append(file_path)
+                
+                if not filtered_files:
+                    print(f"No CSV files found for year range {start_year}-{end_year}")
+                    return False
+                
+                csv_files = filtered_files
+                print(f"Found {len(csv_files)} CSV files for years {start_year}-{end_year}")
+            else:
+                print(f"Found {len(csv_files)} CSV files")
+            
             return self.load_multiple_crash_data(csv_files)
             
         except Exception as e:
             print(f"Error loading from directory: {str(e)}")
             return False
+    
+    def get_available_years_from_directory(self, directory_path, pattern='*.csv'):
+        """
+        Scan directory and extract available years from filenames
+        
+        Returns:
+        --------
+        list : List of years found in filenames, sorted
+        """
+        try:
+            search_path = os.path.join(directory_path, pattern)
+            csv_files = glob.glob(search_path)
+            
+            years = set()
+            for file_path in csv_files:
+                filename = os.path.basename(file_path)
+                year_match = re.search(r'(\d{4})', filename)
+                if year_match:
+                    years.add(int(year_match.group(1)))
+            
+            return sorted(list(years))
+        except Exception as e:
+            print(f"Error scanning directory: {str(e)}")
+            return []
     
     def filter_by_year_range(self, start_year=None, end_year=None):
         """Filter crash data by year range to reduce dataset size"""
