@@ -8,6 +8,7 @@ from bsit import EDSACrashAnalyzer
 import os
 import json
 import pandas as pd
+import numpy as np
 
 # Note: We don't need maplibre Python package!
 # This script generates HTML that uses MapLibre GL JS via CDN
@@ -16,10 +17,97 @@ import pandas as pd
 class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
     """Enhanced analyzer with MapLibre GL JS visualization"""
     
-    def create_maplibre_heatmap(self, save_path='edsa_maplibre_heatmap.html', 
-                                style='detailed', max_points=None):
+    def create_zone_grid(self, zone_size=0.01):
         """
-        Create high-performance MapLibre GL JS heatmap
+        Create GIS-style grid zones similar to folium GIS visualization.
+        Returns GeoJSON FeatureCollection describing each zone parcel.
+        """
+        if getattr(self, '_zone_cache', None) and self._zone_cache.get('zone_size') == zone_size:
+            return self._zone_cache['geojson']
+        
+        if self.crash_data is None or self.crash_data.empty:
+            return {"type": "FeatureCollection", "features": []}
+        
+        lat_min = self.crash_data['latitude'].min()
+        lat_max = self.crash_data['latitude'].max()
+        lon_min = self.crash_data['longitude'].min()
+        lon_max = self.crash_data['longitude'].max()
+        
+        padding = zone_size * 0.5
+        lat_min -= padding
+        lat_max += padding
+        lon_min -= padding
+        lon_max += padding
+        
+        lat_edges = np.arange(lat_min, lat_max + zone_size, zone_size)
+        lon_edges = np.arange(lon_min, lon_max + zone_size, zone_size)
+        
+        features = []
+        zone_id = 0
+        area_sq_km = (zone_size * 111) ** 2 if zone_size > 0 else 0
+        
+        for lat in lat_edges[:-1]:
+            lat_upper = lat + zone_size
+            lat_mask = (self.crash_data['latitude'] >= lat) & (self.crash_data['latitude'] < lat_upper)
+            
+            for lon in lon_edges[:-1]:
+                lon_upper = lon + zone_size
+                mask = lat_mask & (self.crash_data['longitude'] >= lon) & (self.crash_data['longitude'] < lon_upper)
+                crash_count = int(mask.sum())
+                density = crash_count / area_sq_km if area_sq_km > 0 else 0
+                
+                coords = [
+                    [lon, lat],
+                    [lon_upper, lat],
+                    [lon_upper, lat_upper],
+                    [lon, lat_upper],
+                    [lon, lat]
+                ]
+                
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [coords]
+                    },
+                    "properties": {
+                        "zone_id": zone_id,
+                        "crash_count": crash_count,
+                        "density": density,
+                        "center_lat": lat + zone_size / 2,
+                        "center_lon": lon + zone_size / 2,
+                        "fill_color": self.get_zone_color(crash_count)
+                    }
+                })
+                
+                zone_id += 1
+        
+        geojson = {"type": "FeatureCollection", "features": features}
+        self._zone_cache = {"zone_size": zone_size, "geojson": geojson}
+        return geojson
+    
+    @staticmethod
+    def get_zone_color(crash_count):
+        """Match GIS-style color palette based on crash count."""
+        if crash_count == 0:
+            return '#90EE90'
+        if crash_count <= 2:
+            return '#98FB98'
+        if crash_count <= 5:
+            return '#ADFF2F'
+        if crash_count <= 10:
+            return '#FFFF00'
+        if crash_count <= 20:
+            return '#FFA500'
+        if crash_count <= 30:
+            return '#FF6347'
+        return '#DC143C'
+    
+    def create_maplibre_heatmap(self, save_path='edsa_maplibre_heatmap.html', 
+                                style='detailed', max_points=None,
+                                include_gis_zones=True, zone_size=0.01):
+        """
+        Create high-performance MapLibre GL JS heatmap with optional GIS overlay
         
         Parameters:
         -----------
@@ -31,6 +119,10 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
             'dark' - Dark theme heatmap
         max_points : int or None
             Maximum points to render (None = all points)
+        include_gis_zones : bool
+            Whether to add GIS-style parcel overlay similar to folium map
+        zone_size : float
+            Grid cell size in degrees (~0.01 ≈ 1km)
         """
         print("\n" + "="*70)
         print(" Creating MapLibre GL JS High-Performance Map ".center(70))
@@ -76,6 +168,8 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
         else:
             base_style = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
         
+        zone_geojson_data = self.create_zone_grid(zone_size=zone_size) if include_gis_zones else None
+        
         # Create MapLibre HTML with custom styling
         html_content = self._generate_maplibre_html(
             geojson_data, 
@@ -84,7 +178,10 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
             base_style,
             style,
             len(plot_data),
-            len(self.crash_data)
+            len(self.crash_data),
+            zone_geojson_data,
+            include_gis_zones,
+            zone_size
         )
         
         # Save HTML file
@@ -100,7 +197,9 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
         return save_path
     
     def _generate_maplibre_html(self, geojson_data, center_lat, center_lon, 
-                                base_style, style, rendered_points, total_points):
+                                base_style, style, rendered_points, total_points,
+                                zone_geojson_data=None, include_gis_zones=False,
+                                zone_size=0.01):
         """Generate complete MapLibre GL JS HTML"""
         
         # Convert GeoJSON to JSON string
@@ -127,6 +226,11 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
             "type": "FeatureCollection",
             "features": hotspot_features
         }, indent=2)
+        
+        zone_geojson_str = json.dumps(zone_geojson_data, indent=2) if zone_geojson_data else 'null'
+        zone_feature_count = len(zone_geojson_data["features"]) if zone_geojson_data else 0
+        zone_visibility = 'visible' if include_gis_zones and zone_feature_count else 'none'
+        zone_edge_km = zone_size * 111 if zone_size else 0
         
         # Determine layer visibility based on style
         show_circles = 'visible' if style == 'detailed' else 'none'
@@ -287,9 +391,13 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
         <div>
             <span class="stat">📊 {rendered_points:,} points</span>
             <span class="stat">🎯 {len(hotspot_features)} hotspots</span>
+            <span class="stat">🧭 {zone_feature_count} zones</span>
         </div>
         <p style="margin-top: 10px; font-size: 11px; color: #888;">
             Click map for details • Zoom to explore • GPU-powered rendering
+        </p>
+        <p style="margin-top: 5px; font-size: 11px; color: #666;">
+            GIS parcels ≈ {zone_edge_km:.1f} km per side
         </p>
     </div>
     
@@ -310,6 +418,35 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
         <div class="legend-item">
             <div class="legend-color" style="background: rgba(255, 0, 0, 0.6);"></div>
             <span>Very High</span>
+        </div>
+        <h4 style="margin-top: 15px;">Zone Crash Count</h4>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #90EE90;"></div>
+            <span>0 crashes</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #98FB98;"></div>
+            <span>1-2 crashes</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #ADFF2F;"></div>
+            <span>3-5 crashes</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #FFFF00;"></div>
+            <span>6-10 crashes</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #FFA500;"></div>
+            <span>11-20 crashes</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #FF6347;"></div>
+            <span>21-30 crashes</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-color" style="background: #DC143C;"></div>
+            <span>30+ crashes</span>
         </div>
     </div>
     
@@ -347,6 +484,8 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
         
         // Hotspot data
         const hotspotData = {hotspot_geojson_str};
+        const zoneData = {zone_geojson_str};
+        const zoneVisibilityDefault = '{zone_visibility}';
 
         // Load data when map is ready
         map.on('load', () => {{
@@ -483,6 +622,58 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
                 }}
             }});
 
+            if (zoneData && zoneData.features && zoneData.features.length) {{
+                map.addSource('zones', {{
+                    type: 'geojson',
+                    data: zoneData
+                }});
+
+                map.addLayer({{
+                    id: 'zones-fill',
+                    type: 'fill',
+                    source: 'zones',
+                    layout: {{
+                        'visibility': zoneVisibilityDefault
+                    }},
+                    paint: {{
+                        'fill-color': ['get', 'fill_color'],
+                        'fill-opacity': 0.45
+                    }}
+                }});
+
+                map.addLayer({{
+                    id: 'zones-outline',
+                    type: 'line',
+                    source: 'zones',
+                    layout: {{
+                        'visibility': zoneVisibilityDefault
+                    }},
+                    paint: {{
+                        'line-color': '#333333',
+                        'line-width': 1
+                    }}
+                }});
+
+                map.addLayer({{
+                    id: 'zones-label',
+                    type: 'symbol',
+                    source: 'zones',
+                    layout: {{
+                        'visibility': zoneVisibilityDefault,
+                        'text-field': ['concat', 'Zone ', ['get', 'zone_id'], '\\n', ['get', 'crash_count'], ' crashes'],
+                        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+                        'text-size': 10,
+                        'text-offset': [0, 0],
+                        'text-anchor': 'center'
+                    }},
+                    paint: {{
+                        'text-color': '#111111',
+                        'text-halo-color': 'rgba(255,255,255,0.9)',
+                        'text-halo-width': 1.5
+                    }}
+                }});
+            }}
+
             // Add click handlers
             map.on('click', 'crashes-circle', (e) => {{
                 const coordinates = e.features[0].geometry.coordinates.slice();
@@ -516,6 +707,23 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
                     .addTo(map);
             }});
 
+            if (zoneData && zoneData.features && zoneData.features.length) {{
+                map.on('click', 'zones-fill', (e) => {{
+                    const coordinates = e.lngLat;
+                    const props = e.features[0].properties;
+                    
+                    new maplibregl.Popup()
+                        .setLngLat([coordinates.lng, coordinates.lat])
+                        .setHTML(`
+                            <h4>📐 GIS Parcel</h4>
+                            <p><strong>Zone ID:</strong> ${{props.zone_id}}</p>
+                            <p><strong>Crashes:</strong> ${{props.crash_count}}</p>
+                            <p><strong>Density:</strong> ${{Number(props.density).toFixed(2)}} crashes/km²</p>
+                        `)
+                        .addTo(map);
+                }});
+            }}
+
             // Change cursor on hover
             map.on('mouseenter', 'crashes-circle', () => {{
                 map.getCanvas().style.cursor = 'pointer';
@@ -531,9 +739,21 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
                 map.getCanvas().style.cursor = '';
             }});
 
+            if (zoneData && zoneData.features && zoneData.features.length) {{
+                map.on('mouseenter', 'zones-fill', () => {{
+                    map.getCanvas().style.cursor = 'pointer';
+                }});
+                map.on('mouseleave', 'zones-fill', () => {{
+                    map.getCanvas().style.cursor = '';
+                }});
+            }}
+
             console.log('✅ MapLibre GL JS map loaded successfully');
             console.log(`📊 Rendering ${{crashData.features.length}} crash points`);
             console.log(`🎯 ${{hotspotData.features.length}} hotspots identified`);
+            if (zoneData && zoneData.features) {{
+                console.log(`🧭 ${{zoneData.features.length}} GIS parcels rendered`);
+            }}
         }});
         
         // Layer toggle functionality
@@ -550,6 +770,15 @@ class MapLibreCrashAnalyzer(EDSACrashAnalyzer):
             }}
             if (map.getLayer('hotspots-label')) {{
                 map.setLayoutProperty('hotspots-label', 'visibility', visibility);
+            }}
+            if (map.getLayer('zones-fill')) {{
+                map.setLayoutProperty('zones-fill', 'visibility', visibility);
+            }}
+            if (map.getLayer('zones-outline')) {{
+                map.setLayoutProperty('zones-outline', 'visibility', visibility);
+            }}
+            if (map.getLayer('zones-label')) {{
+                map.setLayoutProperty('zones-label', 'visibility', visibility);
             }}
         }});
         
@@ -673,6 +902,19 @@ def main():
     print("\n[INFO] Evaluating model performance...")
     metrics = analyzer.evaluate_model_performance()
     
+    # Create analytical dashboard style figure (Matplotlib 2x2 grid)
+    print("\n[INFO] Analytical dashboard (Matplotlib) is available.")
+    dashboard_choice = input("          View it now? (y/N to skip and save image instead): ").strip().lower()
+    dashboard_path = 'edsa_dashboard_overview.png'
+    try:
+        if dashboard_choice == 'y':
+            analyzer.create_visualizations(max_plot_points=5000, show=True)
+        else:
+            analyzer.create_visualizations(max_plot_points=5000, show=False, save_path=dashboard_path)
+            print(f"[INFO] Dashboard saved to {dashboard_path} (open manually if needed).")
+    except Exception as viz_err:
+        print(f"[WARNING] Failed to generate dashboard figure: {viz_err}")
+    
     # Create MapLibre visualizations
     print("\n[INFO] Creating MapLibre GL JS visualizations...")
     
@@ -692,26 +934,31 @@ def main():
     
     # Create different styles
     print("\n[INFO] Creating multiple map styles...")
+    gis_zone_size = 0.01
+    print(f"[INFO] GIS zone overlay enabled (parcel size ≈ {gis_zone_size*111:.1f} km per side)")
     
     # 1. Detailed heatmap with markers
     analyzer.create_maplibre_heatmap(
         save_path='edsa_maplibre_detailed.html',
         style='detailed',
-        max_points=max_points
+        max_points=max_points,
+        zone_size=gis_zone_size
     )
     
     # 2. Clean heatmap only
     analyzer.create_maplibre_heatmap(
         save_path='edsa_maplibre_heatmap.html',
         style='heatmap_only',
-        max_points=max_points
+        max_points=max_points,
+        zone_size=gis_zone_size
     )
     
     # 3. Dark theme
     analyzer.create_maplibre_heatmap(
         save_path='edsa_maplibre_dark.html',
         style='dark',
-        max_points=max_points
+        max_points=max_points,
+        zone_size=gis_zone_size
     )
     
     print("\n" + "="*70)

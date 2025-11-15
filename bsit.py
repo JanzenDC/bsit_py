@@ -496,7 +496,7 @@ class EDSACrashAnalyzer:
         
         return hits / len(sample_data) if len(sample_data) > 0 else 0.0
     
-    def create_visualizations(self, max_plot_points=10000):
+    def create_visualizations(self, max_plot_points=10000, show=True, save_path=None):
         print("Creating visualizations...")
         
         # Sample data for plotting if too large
@@ -575,7 +575,13 @@ class EDSACrashAnalyzer:
             ax4.set_title('DBSCAN Clustering Results (No clustering data)')
         
         plt.tight_layout()
-        plt.show()
+        if save_path:
+            plt.savefig(save_path, bbox_inches='tight')
+            print(f"[OK] Dashboard figure saved to {save_path}")
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
         
         # Create summary statistics
         self._create_summary_report()
