@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Phase 3 Metrics Analysis Report - Hit Rate & Silhouette Score</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 10px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 20px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 1.5em;
+            margin-bottom: 5px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+        }
+        
+        .header p {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .content {
+            padding: 15px 20px;
+        }
+        
+        .dataset-info {
+            background: #f8f9fa;
+            padding: 10px 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            border-left: 3px solid #667eea;
+        }
+        
+        .dataset-info h2 {
+            color: #667eea;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+        }
+        
+        .dataset-info table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .dataset-info td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 0.9em;
+        }
+        
+        .dataset-info td:first-child {
+            font-weight: bold;
+            color: #555;
+            width: 40%;
+        }
+        
+        .metrics-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        @media (max-width: 768px) {
+            .metrics-section {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .metric-card {
+            background: white;
+            border-radius: 6px;
+            padding: 12px 15px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            border-top: 3px solid;
+        }
+        
+        .metric-card.hit-rate {
+            border-top-color: #e74c3c;
+        }
+        
+        .metric-card.silhouette {
+            border-top-color: #3498db;
+        }
+        
+        .metric-title {
+            font-size: 1.1em;
+            margin-bottom: 8px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin: 8px 0;
+            text-align: center;
+        }
+        
+        .metric-card.hit-rate .metric-value {
+            color: #e74c3c;
+        }
+        
+        .metric-card.silhouette .metric-value {
+            color: #3498db;
+        }
+        
+        .formula-box {
+            background: #f8f9fa;
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin: 10px 0;
+            border-left: 3px solid #667eea;
+        }
+        
+        .formula-box h3 {
+            color: #667eea;
+            margin-bottom: 6px;
+            font-size: 0.95em;
+        }
+        
+        .formula {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            background: white;
+            padding: 8px 10px;
+            border-radius: 4px;
+            margin: 6px 0;
+            text-align: center;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .formula-explanation {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .formula-explanation p {
+            margin: 3px 0;
+            color: #555;
+            font-size: 0.85em;
+        }
+        
+        .formula-explanation strong {
+            color: #333;
+        }
+        
+        .details-table {
+            width: 100%;
+            margin-top: 10px;
+            border-collapse: collapse;
+            font-size: 0.85em;
+        }
+        
+        .details-table th {
+            background: #667eea;
+            color: white;
+            padding: 6px 8px;
+            text-align: left;
+        }
+        
+        .details-table td {
+            padding: 6px 8px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .details-table tr:hover {
+            background: #f8f9fa;
+        }
+        
+        .interpretation {
+            background: #e8f5e9;
+            padding: 8px 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            border-left: 3px solid #4caf50;
+            font-size: 0.85em;
+        }
+        
+        .interpretation strong {
+            color: #2e7d32;
+        }
+        
+        .footer {
+            background: #2c3e50;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-size: 0.8em;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+        
+        .badge.excellent {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .badge.good {
+            background: #8bc34a;
+            color: white;
+        }
+        
+        .badge.fair {
+            background: #ffc107;
+            color: #333;
+        }
+        
+        .badge.poor {
+            background: #f44336;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Phase 3 Metrics Analysis Report</h1>
+            <p>Hit Rate & Silhouette Score Evaluation</p>
+        </div>
+        
+        <div class="content">
+            <div class="dataset-info">
+                <h2>📋 Dataset Information</h2>
+                <table>
+                    <tr>
+                        <td>Total Crash Records</td>
+                        <td>530,525</td>
+                    </tr>
+                    <tr>
+                        <td>Year Range</td>
+                        <td>2013 - 2021</td>
+                    </tr>
+                    <tr>
+                        <td>Analysis Date</td>
+                        <td>2025-11-29 12:50:03</td>
+                    </tr>
+                </table>
+            </div>
+            
+            <div class="metrics-section">
+                <!-- Hit Rate Card -->
+                <div class="metric-card hit-rate">
+                    <div class="metric-title">
+                        🎯 Hit Rate (Capture Rate)
+                    </div>
+                    <div class="metric-value">99.96%</div>
+                    
+                    <div class="formula-box">
+                        <h3>Formula</h3>
+                        <div class="formula">
+                            Hit Rate = ( # of Crash Accidents within high density areas / Total # of Crash accidents ) × 100%
+                        </div>
+                        <div class="formula-explanation">
+                            <p><strong>Where:</strong></p>
+                            <p>• High density areas = Top 20% of the KDE density grid</p>
+                            <p>• Total # of Crash accidents = All crash points in the dataset</p>
+                        </div>
+                    </div>
+                    
+                    <table class="details-table">
+                        <tr>
+                            <th>Metric</th>
+                            <th>Value</th>
+                        </tr>
+                        <tr>
+                            <td>Total # of Crash accidents</td>
+                            <td>5,000</td>
+                        </tr>
+                        <tr>
+                            <td># of Crash Accidents within high density areas</td>
+                            <td>4,998</td>
+                        </tr>
+                        <tr>
+                            <td>Hit Rate (Percentage)</td>
+                            <td><strong>99.96%</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Hit Rate (Decimal)</td>
+                            <td>0.9996</td>
+                        </tr>
+                        <tr>
+                            <td>Top Percentile Used</td>
+                            <td>20%</td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <!-- Silhouette Score Card -->
+                <div class="metric-card silhouette">
+                    <div class="metric-title">
+                        📈 Silhouette Score
+                    </div>
+                    <div class="metric-value">0.8743</div>
+                    
+                    <div class="formula-box">
+                        <h3>Formula</h3>
+                        <div class="formula">
+                            s(i) = (b(i) - a(i)) / max{a(i), b(i)}
+                        </div>
+                        <div class="formula-explanation">
+                            <p><strong>Where:</strong></p>
+                            <p>• <strong>s(i)</strong> = Silhouette score for point i</p>
+                            <p>• <strong>a(i)</strong> = Average distance from point i to the points in the same cluster</p>
+                            <p>• <strong>b(i)</strong> = Average distance from point i to the points from closest surrounding clusters</p>
+                            <p style="margin-top: 10px; font-size: 0.9em; color: #777;">
+                                <em>Source: Firdose, T. (2023, December 8). Understanding the silhouette Score.</em>
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <table class="details-table">
+                        <tr>
+                            <th>Metric</th>
+                            <th>Value</th>
+                        </tr>
+                        <tr>
+                            <td>Average Silhouette Score</td>
+                            <td><strong>0.8743</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Number of Clusters</td>
+                            <td>15</td>
+                        </tr>
+                        <tr>
+                            <td>Clustered Points</td>
+                            <td>511,616</td>
+                        </tr>
+                        <tr>
+                            <td>Score Range</td>
+                            <td>-1.0 to +1.0</td>
+                        </tr>
+                    </table>
+                    
+                    <div class="interpretation">
+                        <strong>Interpretation:</strong> Excellent clustering
+                        <span class="badge excellent">
+                            Excellent
+                        </span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Summary Section -->
+            <div class="formula-box" style="margin-top: 10px;">
+                <h3>📊 Summary</h3>
+                <p style="margin: 6px 0; line-height: 1.4; color: #555; font-size: 0.85em;">
+                    This analysis evaluated the performance of the crash hotspot identification model using two key metrics:
+                </p>
+                <ul style="margin: 6px 0; padding-left: 20px; line-height: 1.5; color: #555; font-size: 0.85em;">
+                    <li><strong>Hit Rate (99.96%):</strong> Measures how effectively the density model identifies high-risk areas. 
+                    A higher hit rate indicates that more crashes occur in the predicted high-density regions.</li>
+                    <li><strong>Silhouette Score (0.8743):</strong> Measures the quality of clustering by evaluating both 
+                    cohesion (how similar points are within clusters) and separation (how distinct clusters are from each other). 
+                    The score of 0.8743 indicates <strong>excellent clustering</strong> clustering quality.</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Generated by Phase 3 Metrics Analysis Tool | EDSA Crash Analysis System</p>
+            <p style="margin-top: 3px; font-size: 0.75em; opacity: 0.8;">© 2025 Research Project</p>
+        </div>
+    </div>
+</body>
+</html>

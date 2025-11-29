@@ -1,0 +1,24 @@
+{
+  "hit_rate": {
+    "value": 99.96000000000001,
+    "value_decimal": 0.9996,
+    "top_percentile": 20,
+    "threshold": 9.512876824357381,
+    "crashes_in_high_density": 4998,
+    "total_crashes": 5000,
+    "formula": "Hit Rate = ( # of Crash Accidents within high density areas / Total # of Crash accidents ) x 100%"
+  },
+  "silhouette_score": {
+    "value": 0.8743166796311401,
+    "n_clusters": 15,
+    "n_clustered_points": 511616,
+    "interpretation": "Excellent clustering",
+    "formula": "s(i) = (b(i) - a(i)) / max{a(i), b(i)}",
+    "formula_components": {
+      "s(i)": "Silhouette score for point i",
+      "a(i)": "Average distance from point i to points in same cluster",
+      "b(i)": "Average distance from point i to closest surrounding cluster"
+    },
+    "source": "Firdose, T. (2023, December 8). Understanding the silhouette Score"
+  }
+}
